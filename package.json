@@ -1,0 +1,33 @@
+{
+  "name": "magpie-notion-ai",
+  "version": "0.2.0",
+  "description": "Magpie / OpenCode provider plugin exposing Notion AI & Custom Agents via the official Notion Agent APIs with streaming, dynamic model pinning, file-upload overflow handling, and Tool Calling.",
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "bin": {
+    "magpie-notion-test": "./bin/test-connection.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AmyraxVPN-Main/magpie-notion-ai.git"
+  },
+  "homepage": "https://github.com/AmyraxVPN-Main/magpie-notion-ai#readme",
+  "keywords": [
+    "magpie",
+    "opencode",
+    "notion",
+    "notion-ai",
+    "claude-code",
+    "openai-compatible"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
