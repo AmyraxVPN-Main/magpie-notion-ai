@@ -1,6 +1,6 @@
 {
   "name": "magpie-notion-ai",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Magpie / OpenCode provider plugin exposing Notion AI & Custom Agents via the official Notion Agent APIs with streaming, dynamic model pinning, file-upload overflow handling, and Tool Calling.",
   "type": "module",
   "main": "./index.mjs",
