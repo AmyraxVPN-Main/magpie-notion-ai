@@ -42,13 +42,22 @@ function withWindowsUserPath(env = process.env) {
   return { ...env, Path: parts.join(';') }
 }
 
+function resolveBin(bin, binArgs) {
+  if (process.platform !== 'win32') return { file: bin, args: binArgs }
+  if (bin === 'magpie') {
+    const exe = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'magpie', 'magpie.com')
+    if (fs.existsSync(exe)) return { file: exe, args: binArgs }
+  }
+  return { file: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', bin, ...binArgs] }
+}
+
 function runSync(bin, binArgs) {
   const env = withWindowsUserPath()
-  const isWin = process.platform === 'win32'
-  const res = spawnSync(bin, binArgs, {
+  const { file, args: resolvedArgs } = resolveBin(bin, binArgs)
+  const res = spawnSync(file, resolvedArgs, {
     encoding: 'utf8',
     env,
-    shell: isWin,
+    shell: false,
     timeout: 15000,
     windowsHide: true,
   })
@@ -205,10 +214,11 @@ function runClaudeOnce({ cwd, prompt, mode, model, timeoutSec, maxTurns }) {
     if (model) cliArgs.push('--model', model.startsWith('notion-ai/') ? model : `notion-ai/${model}`)
     if (maxTurns > 0) cliArgs.push('--max-turns', String(maxTurns))
 
-    const child = spawn('claude', cliArgs, {
+    const { file, args: resolvedArgs } = resolveBin('claude', cliArgs)
+    const child = spawn(file, resolvedArgs, {
       cwd,
       env,
-      shell: process.platform === 'win32',
+      shell: false,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
