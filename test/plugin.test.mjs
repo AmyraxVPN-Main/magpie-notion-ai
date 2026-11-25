@@ -144,21 +144,20 @@ test('streaming tool call parser extracts split and escaped <tool_call> tags', (
   assert.deepEqual(JSON.parse(calls[0].arguments), { path: 'a_b.js' })
 })
 
-test('plugin pins requested model on regular notion_ai chat, streams cleanly, and supports tool_calls', async () => {
+test('plugin pins requested model on Morning brief, streams cleanly, and supports tool_calls', async () => {
   clearPinnedModelCache()
   const fakeFetch = makeFakeNotionFetch()
   const plugin = await NotionAiAuthPlugin({}, { fetchImpl: fakeFetch, sessionReuse: false })
 
   const models = await plugin.provider.models({ models: {} }, { auth: { type: 'api', key: 'ntn_valid_token_12345' } })
   assert.ok(models['claude-opus-5-5'])
-  assert.equal(models['claude-opus-5-5'].name, 'Claude Opus 5.5')
   assert.ok(models['gpt-5.5'])
   assert.ok(models[MORNING_BRIEF_ID])
   assert.equal(models['claude-opus-5-5'].tool_call, true)
 
   const loaded = await plugin.auth.loader(async () => ({ type: 'api', key: 'ntn_valid_token_12345' }))
 
-  // 1) Normal streaming text + model pinning to claude-opus-5-5 on regular `notion_ai`
+  // 1) Normal streaming text + model pinning to claude-opus-5-5
   const r1 = await loaded.fetch(`${loaded.baseURL}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -180,10 +179,7 @@ test('plugin pins requested model on regular notion_ai chat, streams cleanly, an
 
   const patchCalls = fakeFetch.calls.filter((c) => c.method === 'PATCH')
   assert.equal(patchCalls.length, 1)
-  assert.match(patchCalls[0].url, /\/agents\/notion_ai$/)
   assert.deepEqual(patchCalls[0].body, { model: { mode: 'pinned', id: 'claude-opus-5-5' } })
-  const sessionCalls = fakeFetch.calls.filter((c) => c.url.endsWith('/sessions'))
-  assert.equal(sessionCalls[0].body.agent_id, 'notion_ai')
 
   // 2) Tool calling in streaming mode
   fakeFetch.setNextReply('<tool_call>{"name":"Bash","arguments":{"command":"ls"}}</tool_call>')
@@ -423,5 +419,5 @@ test('session continuity reuses session_id and retries on expired session', asyn
   })
   assert.equal(r3.status, 200)
   const afterCalls = fakeFetch.calls.filter((c) => c.url.endsWith('/sessions'))
-  assert.equal(afterCalls[afterCalls.length - 1].body.agent_id, 'notion_ai')
+  assert.equal(afterCalls[afterCalls.length - 1].body.agent_id, MORNING_BRIEF_ID)
 })

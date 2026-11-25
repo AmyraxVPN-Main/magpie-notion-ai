@@ -1,6 +1,6 @@
 # magpie-notion-ai
 
-An open-source **Magpie / OpenCode** provider plugin that exposes **Personal Notion AI (`notion_ai` — regular chat)** and optional workspace **Custom Agents** as a full OpenAI-compatible API (`http://127.0.0.1:3425/v1`) through the official **Notion Agent APIs** (`Notion-Version: 2026-03-11`).
+An open-source **Magpie / OpenCode** provider plugin that exposes **Notion AI** & your workspace **Custom Agents** (such as `Morning brief`) as a full OpenAI-compatible API (`http://127.0.0.1:3425/v1`) through the official **Notion Agent APIs** (`Notion-Version: 2026-03-11`).
 
 Use **Claude Opus 5.5**, **Claude Sonnet 5.5**, **Claude Fable 5.2**, **GPT-6.2 Sol**, **GPT-6 Astra**, **Grok 4.7**, **Gemini 3.7 Flash**, and more inside **Claude Code**, **Codex**, **Cline**, **Cursor**, or any OpenAI-compatible client!
 
@@ -26,7 +26,7 @@ Use **Claude Opus 5.5**, **Claude Sonnet 5.5**, **Claude Fable 5.2**, **GPT-6.2 
 1. Open **Notion → Settings** and enable **Developer Mode**.
 2. Go to **Personal access tokens → New token**.
 3. Select your workspace, enable the **Notion API** capability, and copy your token (`ntn_...`).
-4. Model calls route directly through your regular Personal Notion AI (`notion_ai`) — no Custom Agent setup required!
+4. Make sure you have an active Custom Agent (e.g. **Morning brief**) in your workspace.
 
 ### 2. Install & Connect in Magpie
 
@@ -68,7 +68,7 @@ magpie plugin options notion-ai '{"defaultAgentId":"<custom-agent-uuid>","extraM
 
 | Option | Description |
 | --- | --- |
-| `defaultAgentId` | Optional Custom Agent UUID to route model-pinned calls through (defaults to `notion_ai`, your regular Personal Notion AI chat). |
+| `defaultAgentId` | Custom Agent UUID to route model-pinned calls through (defaults to active `Morning brief`, then first active custom agent, then `notion_ai`). |
 | `extraModels` | Additional Notion public model IDs to include in the Magpie model list. |
 | `sessionReuse` | Reuse Notion `session_id` across multi-turn conversations (default: `true`). |
 | `sessionTtlMs` | Cached session TTL in milliseconds (default: `86400000` = 24h). |

@@ -7,13 +7,14 @@
  *     POST /v1/agents/query, PATCH /v1/agents/:id, POST /v1/sessions (SSE + continue_from),
  *     POST /v1/file_uploads (auto-attaches oversized prompts > 10k chars).
  *   - Exposes all verified Notion workspace models (`claude-opus-5-5`, `claude-sonnet-5-5`,
- *     `gpt-5.5`, `gpt-5.4`, `auto`, etc.) routed via your Personal Notion AI (`notion_ai` —
- *     regular Notion AI chat) by default, or any Custom Agent via `options.defaultAgentId`.
+ *     `gpt-5.5`, `gpt-5.4`, `auto`, etc.) routed via your active primary Custom Agent
+ *     (auto-picks "Morning brief" if active, or `options.defaultAgentId`), plus all Custom
+ *     Agents directly.
  *   - Full streaming `<tool_call>` bridge so Claude Code, Codex, Cline, and other coding
  *     agents can read/edit files and run tools seamlessly.
  *
  * Options (`magpie plugin options notion-ai '{...}'`), all optional:
- *   defaultAgentId  Explicit agent ID/UUID to route model-pinned calls through (default: `notion_ai`)
+ *   defaultAgentId  Explicit agent UUID to route model-pinned calls through (default: auto-picks Morning brief)
  *   extraModels     Array of additional Notion public model IDs to list in Magpie
  *   apiBase         Override Notion API base URL (default https://api.notion.com/v1)
  *   notionVersion   Override Notion-Version header (default 2026-03-11)
@@ -27,8 +28,9 @@ import { createHash } from 'node:crypto'
 import { buildCatalogModels, handleChatCompletions, handleModels } from './lib/handler.mjs'
 import {
   DEFAULT_NOTION_VERSION,
+  listAgents,
   NOTION_API_BASE,
-  PERSONAL_AGENT_ID,
+  pickPrimaryAgent,
   verifyToken,
 } from './lib/notion.mjs'
 import { createSessionStore, defaultStoreDir, SESSION_DEFAULTS } from './lib/sessions.mjs'
@@ -133,9 +135,19 @@ export const NotionAiAuthPlugin = async (_input, options) => {
   const apiBase = opts.apiBase || NOTION_API_BASE
   const notionVersion = opts.notionVersion || DEFAULT_NOTION_VERSION
 
-  // Route model-pinned calls directly to personal Notion AI (`notion_ai` — regular chat)
-  // unless the user explicitly configures `options.defaultAgentId`.
-  const getPrimaryAgentId = async () => opts.defaultAgentId || PERSONAL_AGENT_ID
+  // Cache primary agent discovery for 5 minutes so every request doesn't re-query /v1/agents/query
+  let primaryCache = { tokenHash: '', agentId: '', at: 0 }
+  const getPrimaryAgentId = async (token, signal) => {
+    if (opts.defaultAgentId) return opts.defaultAgentId
+    const th = createHash('sha256').update(String(token)).digest('hex').slice(0, 12)
+    if (primaryCache.tokenHash === th && primaryCache.agentId && Date.now() - primaryCache.at < 5 * 60_000) {
+      return primaryCache.agentId
+    }
+    const agents = await listAgents(token, { apiBase, version: notionVersion, fetchImpl: opts.fetchImpl, signal })
+    const primary = pickPrimaryAgent(agents, opts.defaultAgentId)
+    primaryCache = { tokenHash: th, agentId: primary.id, at: Date.now() }
+    return primary.id
+  }
 
   return {
     config: async (cfg) => {
