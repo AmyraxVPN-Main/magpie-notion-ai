@@ -77,6 +77,29 @@ magpie plugin options notion-ai '{"defaultAgentId":"<custom-agent-uuid>","extraM
 
 Per-model effort levels (`low`/`medium`/`high`/`xhigh`/`max`/`ultra`) are surfaced in Magpie and passed as a reasoning-depth hint in `prompt_context`. Notion's official REST API (`2026-03-11`) currently enforces `model` selection (`auto` or `pinned`) server-side and does not yet expose a dedicated server-side `effort` field.
 
+## Orchestrator CLI (`magpie-notion-ctl`)
+
+Use the built-in zero-dependency CLI to inspect live models & supported efforts, check health without spending credits, switch Claude Code models/efforts, or run timeout-guarded worker steps:
+
+```bash
+# List all 34 models grouped by family with exact supported efforts
+node bin/notion-ctl.mjs catalog --json
+
+# Zero-credit health check (Magpie :3425, Claude CLI, active routes)
+node bin/notion-ctl.mjs health
+
+# Configure Claude Code in Magpie (validated against model's supported efforts)
+node bin/notion-ctl.mjs select claude-opus-5-5 medium
+
+# Run one timeout-guarded, auto-retried Claude Code worker step
+node bin/notion-ctl.mjs run --cwd ./my-project --prompt-file ./step1.txt --mode acceptEdits --timeout 300
+```
+
+Per-request control headers supported on `POST /v1/chat/completions`:
+- `X-Notion-Fresh-Session: 1` — forces a brand-new Notion session (skips cache reuse)
+- `X-Notion-Agent-Id: <uuid|notion_ai>` — overrides the target agent for a single request
+- `X-Notion-Inline-Only: 1` — skips `/v1/file_uploads` to avoid Notion sandbox boot on time-critical turns
+
 ## Testing
 
 ```bash

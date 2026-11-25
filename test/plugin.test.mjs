@@ -557,3 +557,49 @@ test('tool call parser repairs Notion markdown escapes and raw newlines inside l
   assert.equal(calls[0].name, 'Bash')
   assert.equal(JSON.parse(calls[0].arguments).command, 'echo #hello!\nline2_ok')
 })
+
+test('GET /v1/models exposes rich metadata (family, efforts, context_window) and X-Notion-* headers control session/agent', async () => {
+  clearPinnedModelCache()
+  const fakeFetch = makeFakeNotionFetch()
+  const plugin = await NotionAiAuthPlugin({}, { fetchImpl: fakeFetch, sessionReuse: true, sessionDir: '' })
+  const loaded = await plugin.auth.loader(async () => ({ type: 'api', key: 'ntn_valid_token_12345' }))
+
+  // 1) Rich /v1/models metadata
+  const mr = await loaded.fetch(`${loaded.baseURL}/models`, { method: 'GET' })
+  assert.equal(mr.status, 200)
+  const mdata = await mr.json()
+  const opus = mdata.data.find((m) => m.id === 'claude-opus-5-5')
+  assert.equal(opus.family, 'Claude')
+  assert.deepEqual(opus.efforts, ['low', 'medium', 'high', 'xhigh', 'max'])
+  assert.equal(opus.context_window, 1000000)
+
+  // 2) Turn 1 saves session, Turn 2 with X-Notion-Fresh-Session: 1 forces fresh session + X-Notion-Agent-Id overrides agent
+  await loaded.fetch(`${loaded.baseURL}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-magpie-session': 'orch-1' },
+    body: JSON.stringify({ model: 'notion-ai/auto', stream: false, messages: [{ role: 'user', content: 'Step 1' }] }),
+  })
+  await loaded.fetch(`${loaded.baseURL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-magpie-session': 'orch-1',
+      'x-notion-fresh-session': '1',
+      'x-notion-agent-id': 'notion_ai',
+    },
+    body: JSON.stringify({
+      model: 'notion-ai/auto',
+      stream: false,
+      messages: [
+        { role: 'user', content: 'Step 1' },
+        { role: 'assistant', content: 'Hello_from_Notion!' },
+        { role: 'user', content: 'Step 2 fresh' },
+      ],
+    }),
+  })
+
+  const sessCalls = fakeFetch.calls.filter((c) => c.url.endsWith('/sessions'))
+  assert.equal(sessCalls.length, 2)
+  assert.equal(sessCalls[1].body.session_id, undefined)
+  assert.equal(sessCalls[1].body.agent_id, 'notion_ai')
+})

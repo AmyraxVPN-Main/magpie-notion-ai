@@ -117,12 +117,25 @@ function makeFetch(token, opts, sessions, getPrimaryAgentId) {
     const sessionKey = ['x-magpie-session', 'session_id', 'x-session-id', 'x-session-affinity', 'x-thread-id', 'x-conversation-id']
       .map((n) => headerOf(input, init, n))
       .find((v) => typeof v === 'string' && v.trim())
+    const freshHeader = String(headerOf(input, init, 'x-notion-fresh-session') || '').trim().toLowerCase()
+    const freshSession = freshHeader === '1' || freshHeader === 'true' || freshHeader === 'yes'
+    const inlineHeader = String(headerOf(input, init, 'x-notion-inline-only') || '').trim().toLowerCase()
+    const inlineOnly = inlineHeader === '1' || inlineHeader === 'true' || inlineHeader === 'yes'
+    const agentOverride = String(headerOf(input, init, 'x-notion-agent-id') || '').trim()
 
     return handleChatCompletions({
       body,
       token,
       sessions,
-      options: { ...opts, identity, sessionKey, getPrimaryAgentId },
+      options: {
+        ...opts,
+        identity,
+        sessionKey,
+        freshSession,
+        inlineOnly,
+        ...(agentOverride ? { defaultAgentId: agentOverride } : {}),
+        getPrimaryAgentId,
+      },
       effortHeader: headerOf(input, init, 'x-magpie-effort'),
       signal: init?.signal,
     })
