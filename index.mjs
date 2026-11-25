@@ -162,7 +162,7 @@ export const NotionAiAuthPlugin = async (_input, options) => {
 
     auth: {
       provider: PROVIDER,
-      maxConcurrency: 2,
+      maxConcurrency: Number(opts.maxConcurrency) > 0 ? Math.floor(Number(opts.maxConcurrency)) : 1,
       methods: [
         {
           type: 'api',

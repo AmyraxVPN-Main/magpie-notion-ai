@@ -421,3 +421,139 @@ test('session continuity reuses session_id and retries on expired session', asyn
   const afterCalls = fakeFetch.calls.filter((c) => c.url.endsWith('/sessions'))
   assert.equal(afterCalls[afterCalls.length - 1].body.agent_id, MORNING_BRIEF_ID)
 })
+
+test('parallel subagents sharing x-magpie-session on Turn 1 never collide on the same Notion session', async () => {
+  clearPinnedModelCache()
+  const fakeFetch = makeFakeNotionFetch()
+  const plugin = await NotionAiAuthPlugin({}, { fetchImpl: fakeFetch, sessionReuse: true, sessionDir: '' })
+  const loaded = await plugin.auth.loader(async () => ({ type: 'api', key: 'ntn_valid_token_12345' }))
+
+  await loaded.fetch(`${loaded.baseURL}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-magpie-session': 'parent-workflow-1' },
+    body: JSON.stringify({ model: 'notion-ai/auto', stream: false, messages: [{ role: 'user', content: 'Subagent A: design 3D iPhone' }] }),
+  })
+  await loaded.fetch(`${loaded.baseURL}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-magpie-session': 'parent-workflow-1' },
+    body: JSON.stringify({ model: 'notion-ai/auto', stream: false, messages: [{ role: 'user', content: 'Subagent B: design Persian keyboard' }] }),
+  })
+
+  const sessionCalls = fakeFetch.calls.filter((c) => c.url.endsWith('/sessions'))
+  assert.equal(sessionCalls.length, 2)
+  assert.equal(sessionCalls[0].body.session_id, undefined)
+  assert.equal(sessionCalls[1].body.session_id, undefined)
+  assert.equal(sessionCalls[0].body.agent_id, MORNING_BRIEF_ID)
+  assert.equal(sessionCalls[1].body.agent_id, MORNING_BRIEF_ID)
+})
+
+test('continue_from fallback picks newest post-prior event and never splices Turn 1 text onto Turn 2', async () => {
+  clearPinnedModelCache()
+  const sessionBodies = []
+  let callNum = 0
+
+  const fetchImpl = async (url, init = {}) => {
+    const u = String(url)
+    const body = typeof init.body === 'string' ? JSON.parse(init.body) : null
+    if (u.endsWith('/agents/query')) {
+      return new Response(
+        JSON.stringify({ results: [{ id: MORNING_BRIEF_ID, name: 'Morning brief', status: 'active', is_favorited: true, model: { mode: 'pinned', id: 'claude-opus-5-5' } }] }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    }
+    if (u.includes('/agents/') && init.method === 'PATCH') {
+      return new Response(JSON.stringify({ id: MORNING_BRIEF_ID, model: body?.model }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    if (u.includes('/events/query')) {
+      // Simulate Notion returning events in descending (newest-first) order across Turn 1 & Turn 2!
+      return new Response(
+        JSON.stringify({
+          results: [
+            { id: 'ev_t2_user', type: 'user.message', sequence: 10 },
+            { id: 'ev_t1_done', type: 'session.status', status: 'completed', sequence: 6 },
+            { id: 'ev_t1_msg', type: 'agent.message', sequence: 5 },
+            { id: 'ev_t1_user', type: 'user.message', sequence: 4 },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    }
+    if (u.endsWith('/sessions')) {
+      sessionBodies.push(body)
+      callNum++
+      if (callNum === 1) {
+        // Turn 1 completes cleanly
+        return sseResponse([
+          { event: 'session.snapshot', data: { type: 'session.snapshot', session: { object: 'session', id: 'sess-splice-1', status: 'in_progress' } } },
+          { event: 'event.committed', data: { type: 'event.committed', event: { object: 'session_event', id: 'ev_t1_user', sequence: 4, session_id: 'sess-splice-1', type: 'user.message' } } },
+          { event: 'event.committed', data: { type: 'event.committed', event: { object: 'session_event', id: 'ev_t1_msg', sequence: 5, session_id: 'sess-splice-1', type: 'agent.message', content: [{ type: 'text', text: '<tool_call>{"name":"Write","arguments":{"file_path":"a.html"}}</tool_call>' }] } } },
+          { event: 'event.committed', data: { type: 'event.committed', event: { object: 'session_event', id: 'ev_t1_done', sequence: 6, session_id: 'sess-splice-1', type: 'session.status', status: 'completed' } } },
+          { event: 'stream.end', data: { type: 'stream.end', session_id: 'sess-splice-1', status: 'completed' } },
+        ])
+      }
+      if (callNum === 2) {
+        // Turn 2 rolls over at 120s BEFORE emitting any event.committed!
+        return sseResponse([
+          { event: 'session.snapshot', data: { type: 'session.snapshot', session: { object: 'session', id: 'sess-splice-1', status: 'in_progress' } } },
+          { event: 'event.provisional', data: { type: 'event.provisional', event: { object: 'session_event', id: 'stream_t2', session_id: 'sess-splice-1', type: 'agent.message', content: [{ type: 'text', text: '<tool_call>{"name":"Bash","arguments":{"command":"echo part2 ' }] } } },
+          { event: 'stream.end', data: { type: 'stream.end', session_id: 'sess-splice-1', status: 'in_progress' } },
+        ])
+      }
+      // Call 3: continue_from MUST use ev_t2_user (NOT ev_t1_user!) and finish cleanly
+      return sseResponse([
+        { event: 'event.committed', data: { type: 'event.committed', event: { object: 'session_event', id: 'ev_t2_msg', sequence: 11, session_id: 'sess-splice-1', type: 'agent.message', content: [{ type: 'text', text: '<tool_call>{"name":"Bash","arguments":{"command":"echo part2 done"}}</tool_call>' }] } } },
+        { event: 'event.committed', data: { type: 'event.committed', event: { object: 'session_event', id: 'ev_t2_done', sequence: 12, session_id: 'sess-splice-1', type: 'session.status', status: 'completed' } } },
+        { event: 'stream.end', data: { type: 'stream.end', session_id: 'sess-splice-1', status: 'completed' } },
+      ])
+    }
+    return new Response('not found', { status: 404 })
+  }
+
+  const plugin = await NotionAiAuthPlugin({}, { fetchImpl, sessionReuse: true, sessionDir: '' })
+  const loaded = await plugin.auth.loader(async () => ({ type: 'api', key: 'ntn_valid_token_12345' }))
+
+  // Turn 1
+  const t1 = await loaded.fetch(`${loaded.baseURL}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'notion-ai/claude-opus-5-5',
+      stream: false,
+      tools: [{ type: 'function', function: { name: 'Write', parameters: { type: 'object' } } }, { type: 'function', function: { name: 'Bash', parameters: { type: 'object' } } }],
+      messages: [{ role: 'user', content: 'Write part 1' }],
+    }),
+  })
+  const j1 = await t1.json()
+  assert.equal(j1.choices[0].message.tool_calls[0].function.name, 'Write')
+
+  // Turn 2 (reuses sess-splice-1 and hits rollover before committed event)
+  const t2 = await loaded.fetch(`${loaded.baseURL}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'notion-ai/claude-opus-5-5',
+      stream: false,
+      tools: [{ type: 'function', function: { name: 'Write', parameters: { type: 'object' } } }, { type: 'function', function: { name: 'Bash', parameters: { type: 'object' } } }],
+      messages: [
+        { role: 'user', content: 'Write part 1' },
+        j1.choices[0].message,
+        { role: 'tool', tool_call_id: j1.choices[0].message.tool_calls[0].id, content: 'Wrote part 1' },
+      ],
+    }),
+  })
+  const j2 = await t2.json()
+  assert.equal(sessionBodies.length, 3)
+  assert.deepEqual(sessionBodies[2], { session_id: 'sess-splice-1', continue_from: 'ev_t2_user' })
+  assert.equal(j2.choices[0].message.tool_calls[0].function.name, 'Bash')
+  assert.deepEqual(JSON.parse(j2.choices[0].message.tool_calls[0].function.arguments), { command: 'echo part2 done' })
+})
+
+test('tool call parser repairs Notion markdown escapes and raw newlines inside large JSON payloads', () => {
+  const parser = createToolCallParser({ enabled: true })
+  const messy = '<tool_call>{"name":"Bash","arguments":{"command":"echo \\#hello\\!\nline2\\_ok"}}</tool_call>'
+  const items = [...parser.push(messy), ...parser.flush()]
+  const calls = items.filter((i) => i.type === 'tool_call').map((i) => i.call)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].name, 'Bash')
+  assert.equal(JSON.parse(calls[0].arguments).command, 'echo #hello!\nline2_ok')
+})
